@@ -1,0 +1,5 @@
+#!/bin/zsh -l
+: "${MYTERMINAL_SMOKE_MARKER:?MYTERMINAL_SMOKE_MARKER is required}"
+printf 'MYTERMINAL_SMOKE_OUTPUT\n'
+printf 'ran\n' > "$MYTERMINAL_SMOKE_MARKER"
+sleep 30

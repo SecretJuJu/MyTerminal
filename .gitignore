@@ -1,0 +1,11 @@
+.DS_Store
+/.build
+# `make bundle` 산출물. 빌드 결과라 소스와 같이 둘 이유가 없다.
+/MyTerminal.app
+/.swiftpm
+/Packages
+xcuserdata/
+DerivedData/
+.netrc
+/*.xcodeproj
+Package.resolved.bak
