@@ -11,6 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fontSize: Float = AppDelegate.defaultFontSize
     private var theme: AppTheme = .ghosttyDefault
     private var themeSubmenu: NSMenu?
+    /// 탭 자리를 고르는 ⌘1…⌘9 항목 수.
+    private static let tabShortcutCount = 9
 
     private let projectStore = ProjectStore()
     /// A sheet is owned by nobody else while it is up; without this it would
@@ -94,6 +96,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         presentAddRepositorySheet(projectID: projectID, from: controller)
     }
 
+    @objc private func newTab(_: Any?) {
+        keyWindowController()?.openTab()
+    }
+
+    /// ⌘W. 나뉘어 있으면 pane 하나만, 하나뿐이면 탭째 닫는다. 창은 ⇧⌘W.
+    @objc private func closeTab(_: Any?) {
+        keyWindowController()?.closeActive()
+    }
+
+    @objc private func selectNextTab(_: Any?) {
+        keyWindowController()?.selectNextTab()
+    }
+
+    @objc private func selectPreviousTab(_: Any?) {
+        keyWindowController()?.selectPreviousTab()
+    }
+
+    @objc private func selectTabByNumber(_ sender: NSMenuItem) {
+        guard let number = sender.representedObject as? Int else { return }
+        keyWindowController()?.selectTab(number: number)
+    }
+
+    @objc private func splitRight(_: Any?) {
+        keyWindowController()?.splitActivePane(axis: .horizontal)
+    }
+
+    @objc private func splitDown(_: Any?) {
+        keyWindowController()?.splitActivePane(axis: .vertical)
+    }
+
+    @objc private func focusPaneLeft(_: Any?) {
+        keyWindowController()?.movePaneFocus(.left)
+    }
+
+    @objc private func focusPaneRight(_: Any?) {
+        keyWindowController()?.movePaneFocus(.right)
+    }
+
+    @objc private func focusPaneUp(_: Any?) {
+        keyWindowController()?.movePaneFocus(.up)
+    }
+
+    @objc private func focusPaneDown(_: Any?) {
+        keyWindowController()?.movePaneFocus(.down)
+    }
+
     @objc private func removeCurrentProject(_: Any?) {
         guard let controller = keyWindowController() else { return }
         guard let projectID = controller.activeProjectID else {
@@ -122,6 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let fileMenuItem = NSMenuItem()
         fileMenuItem.submenu = menu("File", items: [
+            ("New Tab", #selector(newTab(_:)), "t"),
             ("New Window", #selector(newWindow(_:)), "n"),
             separator,
             // Uppercase key equivalents carry Shift, so these read ⇧⌘N / ⇧⌘A.
@@ -129,7 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("Add Repository…", #selector(addRepository(_:)), "A"),
             ("Remove Project…", #selector(removeCurrentProject(_:)), nil),
             separator,
-            ("Close Window", #selector(NSWindow.performClose(_:)), "w"),
+            ("Close Tab", #selector(closeTab(_:)), "w"),
+            ("Close Window", #selector(NSWindow.performClose(_:)), "W"),
         ])
         mainMenu.addItem(fileMenuItem)
 
@@ -151,6 +201,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // carries it from the key window down to the split controller.
             ("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s"),
             separator,
+            ("Split Right", #selector(splitRight(_:)), "d"),
+            ("Split Down", #selector(splitDown(_:)), "D"),
+            ("Select Pane Left", #selector(focusPaneLeft(_:)), "←"),
+            ("Select Pane Right", #selector(focusPaneRight(_:)), "→"),
+            ("Select Pane Up", #selector(focusPaneUp(_:)), "↑"),
+            ("Select Pane Down", #selector(focusPaneDown(_:)), "↓"),
+            separator,
             ("Bigger Font", #selector(zoomFontIn(_:)), "+"),
             ("Smaller Font", #selector(zoomFontOut(_:)), "-"),
             ("Reset Font Size", #selector(resetFontSize(_:)), "0"),
@@ -162,11 +219,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // people already have in their fingers from Xcode.
         viewMenu.item(withTitle: "Toggle Sidebar")?
             .keyEquivalentModifierMask = [.control, .command]
+        // pane 이동은 ⌘⌥+방향키. 방향키에 ⌘만 얹으면 프롬프트 이동과 부딪친다.
+        for title in [
+            "Select Pane Left", "Select Pane Right", "Select Pane Up", "Select Pane Down",
+        ] {
+            viewMenu.item(withTitle: title)?
+                .keyEquivalentModifierMask = [.command, .option]
+        }
         let viewMenuItem = NSMenuItem()
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
+        let windowMenuItem = NSMenuItem()
+        windowMenuItem.submenu = buildWindowMenu()
+        mainMenu.addItem(windowMenuItem)
+
         return mainMenu
+    }
+
+    /// 탭 이동은 macOS 관례대로 Window 메뉴에 둔다. ⌃⇥는 Tab 문자에 Control을
+    /// 얹어야 나오므로 튜플로는 표현할 수 없어 뒤에서 손본다.
+    private func buildWindowMenu() -> NSMenu {
+        let windowMenu = menu("Window", items: [
+            ("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
+            separator,
+            ("Show Next Tab", #selector(selectNextTab(_:)), "\t"),
+            ("Show Previous Tab", #selector(selectPreviousTab(_:)), "\t"),
+            separator,
+        ])
+        windowMenu.item(withTitle: "Show Next Tab")?
+            .keyEquivalentModifierMask = [.control]
+        windowMenu.item(withTitle: "Show Previous Tab")?
+            .keyEquivalentModifierMask = [.control, .shift]
+
+        for number in 1 ... Self.tabShortcutCount {
+            let item = NSMenuItem(
+                title: "탭 \(number)",
+                action: #selector(selectTabByNumber(_:)),
+                keyEquivalent: "\(number)"
+            )
+            // 숫자를 실어 보내야 하므로 responder chain에 태우지 않고 직접 받는다.
+            item.target = self
+            item.representedObject = number
+            windowMenu.addItem(item)
+        }
+        return windowMenu
     }
 
     // MARK: - Helpers
