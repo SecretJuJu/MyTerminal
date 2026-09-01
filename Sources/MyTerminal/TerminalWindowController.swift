@@ -219,6 +219,85 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         focusActivePane()
     }
 
+    // MARK: - 창 사이 이동
+
+    /// 창을 옮겨 다니는 탭 묶음. 셸을 새로 띄우지 않고 세션 객체를 그대로
+    /// 넘긴다 — 다시 만들면 스크롤백이 날아간다.
+    struct DetachedTabs {
+        let selection: SidebarSelection
+        let tabs: [TerminalTab]
+        let sessions: [UUID: TerminalSession]
+    }
+
+    func detachActiveTab() -> DetachedTabs? {
+        guard var group = groups[activeSelection], let tab = group.activeTab else { return nil }
+        let selection = activeSelection
+
+        _ = group.closeTab(id: tab.id)
+        groups[selection] = group.isEmpty ? nil : group
+
+        let moved = extract(tab)
+        removeTabView(tab.id)
+        syncViews()
+        closeIfEmpty()
+        return DetachedTabs(selection: selection, tabs: [tab], sessions: moved)
+    }
+
+    func detachAllTabs() -> [DetachedTabs] {
+        let detached = groups.map { selection, group in
+            var moved: [UUID: TerminalSession] = [:]
+            for tab in group.tabs {
+                moved.merge(extract(tab)) { current, _ in current }
+                removeTabView(tab.id)
+            }
+            return DetachedTabs(selection: selection, tabs: group.tabs, sessions: moved)
+        }
+        groups = [:]
+        syncViews()
+        closeIfEmpty()
+        return detached
+    }
+
+    func adopt(_ detached: DetachedTabs) {
+        for (id, session) in detached.sessions {
+            session.delegate = self
+            sessions[id] = session
+        }
+        var group = groups[detached.selection] ?? TabGroup()
+        for tab in detached.tabs {
+            group.append(tab)
+        }
+        groups[detached.selection] = group
+        activeSelection = detached.selection
+
+        sidebar.reload(projects: projects, selection: activeSelection)
+        syncViews()
+        focusActivePane()
+    }
+
+    /// 세션을 이 창에서 떼어 낸다.
+    ///
+    /// 뷰를 상위 뷰에서 먼저 빼는 것이 중요하다. `removeFromSuperview()`는
+    /// 그 뷰를 가리키는 제약도 같이 걷어내므로, 새 창의 pane 컨테이너에 붙일
+    /// 때 옛 컨테이너의 제약이 따라와 충돌하지 않는다.
+    private func extract(_ tab: TerminalTab) -> [UUID: TerminalSession] {
+        var moved: [UUID: TerminalSession] = [:]
+        for id in tab.sessions {
+            guard let session = sessions.removeValue(forKey: id) else { continue }
+            session.setVisible(false)
+            session.view.removeFromSuperview()
+            moved[id] = session
+        }
+        return moved
+    }
+
+    /// 탭을 다 내보낸 창은 닫는다. 마지막 탭을 새 창으로 뺐는데 빈 창이
+    /// 남아 있으면 안 된다.
+    private func closeIfEmpty() {
+        guard groups.values.allSatisfy(\.isEmpty) else { return }
+        window?.close()
+    }
+
     func pasteFromClipboard() {
         activeSession?.pasteFromClipboard()
     }

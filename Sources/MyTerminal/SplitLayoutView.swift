@@ -171,30 +171,20 @@ private final class ThemedSplitView: NSSplitView {
         distributeEvenly()
     }
 
+    /// 분할선 위치를 직접 옮긴다. 자식 프레임을 써 놓고 `adjustSubviews()`를
+    /// 부르는 방법은 통하지 않는다 — NSSplitView가 이전 비율을 기준으로 다시
+    /// 나누기 때문에, 새로 끼운 pane이 폭 0으로 남고 먼저 있던 pane이 전부
+    /// 가져간다.
     private func distributeEvenly() {
-        let count = CGFloat(arrangedSubviews.count)
-        let dividers = dividerThickness * (count - 1)
-        if isVertical {
-            let width = (bounds.width - dividers) / count
-            for (index, view) in arrangedSubviews.enumerated() {
-                view.frame = NSRect(
-                    x: (width + dividerThickness) * CGFloat(index),
-                    y: 0,
-                    width: width,
-                    height: bounds.height
-                )
-            }
-        } else {
-            let height = (bounds.height - dividers) / count
-            for (index, view) in arrangedSubviews.enumerated() {
-                view.frame = NSRect(
-                    x: 0,
-                    y: (height + dividerThickness) * CGFloat(index),
-                    width: bounds.width,
-                    height: height
-                )
-            }
+        let count = arrangedSubviews.count
+        guard count > 1 else { return }
+
+        let total = isVertical ? bounds.width : bounds.height
+        let usable = total - dividerThickness * CGFloat(count - 1)
+        let slice = usable / CGFloat(count)
+        for index in 0 ..< (count - 1) {
+            let offset = (slice + dividerThickness) * CGFloat(index) + slice
+            setPosition(offset, ofDividerAt: index)
         }
-        adjustSubviews()
     }
 }

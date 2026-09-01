@@ -39,13 +39,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Window management
 
     @objc func newWindow(_: Any?) {
+        makeWindow().showWindow(nil)
+    }
+
+    private func makeWindow() -> TerminalWindowController {
         let controller = TerminalWindowController(
             fontSize: fontSize,
             theme: theme,
             projects: projectStore.projects
         )
         windows.append(controller)
-        controller.showWindow(nil)
+        return controller
     }
 
     func windowControllerDidClose(_ controller: TerminalWindowController) {
@@ -116,6 +120,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectTabByNumber(_ sender: NSMenuItem) {
         guard let number = sender.representedObject as? Int else { return }
         keyWindowController()?.selectTab(number: number)
+    }
+
+    /// 활성 탭을 새 창으로 뺀다. 셸은 그대로 따라간다.
+    @objc private func moveTabToNewWindow(_: Any?) {
+        guard
+            let source = keyWindowController(),
+            let detached = source.detachActiveTab()
+        else { return }
+
+        let controller = makeWindow()
+        controller.adopt(detached)
+        controller.showWindow(nil)
+    }
+
+    /// 다른 창의 탭을 전부 키 창으로 모으고 빈 창은 닫는다. 같은 프로젝트의
+    /// 탭은 그 프로젝트 묶음 뒤에 이어 붙는다.
+    @objc private func mergeAllWindows(_: Any?) {
+        guard let target = keyWindowController(), windows.count > 1 else { return }
+        // 창 목록은 빈 창이 스스로 닫히면서 바뀐다. 먼저 훑어 두고 돈다.
+        let sources = windows.filter { $0 !== target }
+        let restore: SidebarSelection = target.activeProjectID.map { .project($0) } ?? .home
+
+        for source in sources {
+            for detached in source.detachAllTabs() {
+                target.adopt(detached)
+            }
+        }
+        // 합치는 동안 마지막으로 들어온 프로젝트로 화면이 옮겨간다. 원래 보던
+        // 자리로 되돌려 놓는다.
+        target.select(restore)
     }
 
     @objc private func splitRight(_: Any?) {
@@ -243,10 +277,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let windowMenu = menu("Window", items: [
             ("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
             separator,
+            ("Move Tab to New Window", #selector(moveTabToNewWindow(_:)), "n"),
+            ("Merge All Windows", #selector(mergeAllWindows(_:)), nil),
+            separator,
             ("Show Next Tab", #selector(selectNextTab(_:)), "\t"),
             ("Show Previous Tab", #selector(selectPreviousTab(_:)), "\t"),
             separator,
         ])
+        // ⌘N은 새 창이 이미 쓰고 있다. 탭을 빼내는 것은 ⌃⌘N.
+        windowMenu.item(withTitle: "Move Tab to New Window")?
+            .keyEquivalentModifierMask = [.control, .command]
         windowMenu.item(withTitle: "Show Next Tab")?
             .keyEquivalentModifierMask = [.control]
         windowMenu.item(withTitle: "Show Previous Tab")?
