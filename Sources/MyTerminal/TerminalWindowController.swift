@@ -305,6 +305,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         activeSession?.pasteFromClipboard()
     }
 
+    func clearScreen() {
+        activeSession?.clearScreen()
+    }
+
     func jumpToPrompt(by offset: Int16) {
         activeSession?.jumpToPrompt(by: offset)
     }

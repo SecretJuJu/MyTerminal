@@ -126,6 +126,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyWindowController()?.pasteFromClipboard()
     }
 
+    @objc private func clearTerminal(_: Any?) {
+        keyWindowController()?.clearScreen()
+    }
+
     @objc private func jumpToPreviousPrompt(_: Any?) {
         keyWindowController()?.jumpToPrompt(by: -1)
     }
@@ -271,9 +275,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let editMenuItem = NSMenuItem()
         editMenuItem.submenu = menu("Edit", items: [
-            // `copy:` travels the responder chain to the focused terminal view.
+            // `copy:`와 `selectAll:`은 responder chain을 타고 포커스한 터미널
+            // 뷰까지 간다. 붙여넣기만 우리가 받는다 — 터미널의 paste는 클립보드
+            // 내용을 PTY로 흘리는 별개 동작이라 뷰의 기본 paste와 다르다.
             ("Copy", NSSelectorFromString("copy:"), "c"),
             ("Paste", #selector(pasteIntoTerminal(_:)), "v"),
+            ("Select All", NSSelectorFromString("selectAll:"), "a"),
+            separator,
+            ("Clear Screen", #selector(clearTerminal(_:)), "k"),
         ])
         mainMenu.addItem(editMenuItem)
 

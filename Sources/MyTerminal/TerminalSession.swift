@@ -141,6 +141,10 @@ final class TerminalSession {
         view.performBindingAction("paste_from_clipboard")
     }
 
+    func clearScreen() {
+        view.performBindingAction("clear_screen")
+    }
+
     func jumpToPrompt(by offset: Int16) {
         view.jumpToPrompt(by: offset)
     }
