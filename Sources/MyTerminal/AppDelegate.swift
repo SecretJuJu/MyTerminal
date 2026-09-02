@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let projectStore = ProjectStore()
     private let workspaceStore = WorkspaceStore()
     private let snapshotStore = SessionSnapshotStore()
+    private let settingsStore = SettingsStore()
     /// A sheet is owned by nobody else while it is up; without this it would
     /// be released the moment the presenting call returns.
     private var activeSheet: FormSheet?
@@ -25,6 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_: Notification) {
         Log.info("launched — building menu and opening first window")
+        // 메뉴를 짓기 전에 읽는다. 테마 메뉴의 체크 표시가 지금 걸린 테마를
+        // 가리켜야 하고, 창도 그 값으로 열려야 한다.
+        loadSettings()
         NSApp.mainMenu = buildMainMenu()
         restoreWorkspace()
         NSApp.activate(ignoringOtherApps: true)
@@ -362,6 +366,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for controller in windows {
             controller.applyFontSize(size)
         }
+        saveSettings()
+    }
+
+    // MARK: - 설정
+
+    private func loadSettings() {
+        guard let settings = settingsStore.load() else { return }
+        theme = settings.resolvedTheme()
+        fontSize = settings.resolvedFontSize(
+            minimum: Self.minFontSize,
+            maximum: Self.maxFontSize,
+            fallback: Self.defaultFontSize
+        )
+        Log.info("settings loaded — theme \(theme.displayName), font \(fontSize)")
+    }
+
+    private func saveSettings() {
+        settingsStore.save(AppSettings(theme: theme.rawValue, fontSize: fontSize))
     }
 
     // MARK: - Theme
@@ -398,6 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.state = candidate == theme ? .on : .off
             }
         }
+        saveSettings()
         Log.info("theme → \(newTheme.displayName)")
     }
 
