@@ -341,7 +341,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     private func makeSession(
         for selection: SidebarSelection,
         id: UUID = UUID(),
-        workingDirectory: String? = nil
+        workingDirectory: String? = nil,
+        restorePath: String? = nil
     ) -> TerminalSession? {
         let session: TerminalSession
         switch selection {
@@ -351,7 +352,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
                 workingDirectory: workingDirectory,
                 environment: [:],
                 fontSize: fontSize,
-                theme: theme
+                theme: theme,
+                restorePath: restorePath
             )
         case let .project(projectID):
             guard let project = projects.first(where: { $0.id == projectID }) else { return nil }
@@ -363,7 +365,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
                     "MYTERMINAL_PROJECT_DIR": project.directory,
                 ],
                 fontSize: fontSize,
-                theme: theme
+                theme: theme,
+                restorePath: restorePath
             )
         }
 
@@ -380,9 +383,25 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
             _ = makeSession(
                 for: selection,
                 id: id,
-                workingDirectory: saved?.workingDirectory
+                workingDirectory: saved?.workingDirectory,
+                restorePath: (NSApp.delegate as? AppDelegate)?.snapshotPath(for: id)
             )
         }
+    }
+
+    /// 종료 직전에 살아 있는 pane의 화면을 뜬다. 아직 깨우지 않은 pane은
+    /// 이번 실행에서 건드린 적이 없으므로 남겨 둔 기록이 그대로 다음 실행까지
+    /// 간다.
+    func captureSnapshots(into store: SessionSnapshotStore) {
+        for session in sessions.values {
+            guard let text = session.snapshot() else { continue }
+            store.write(text, for: session.id)
+        }
+    }
+
+    /// 이 창이 알고 있는 모든 pane. 남은 기록을 치울 때 기준이 된다.
+    var knownSessionIDs: Set<UUID> {
+        Set(sessions.keys).union(dormantSessions.keys)
     }
 
     /// 화면을 모델에 맞춘다. 탭·분할이 바뀔 때마다 여기 한 번만 들르면 된다.

@@ -43,11 +43,17 @@ final class TerminalSession {
         workingDirectory: String?,
         environment: [String: String],
         fontSize: Float,
-        theme: AppTheme
+        theme: AppTheme,
+        restorePath: String? = nil
     ) {
         self.id = id
         self.fontSize = fontSize
         self.workingDirectory = workingDirectory
+
+        // 되찍을 내용이 있고 셸을 아는 경우에만 감싼다.
+        let replay = restorePath.flatMap { path in
+            LoginShell.current.map { (path: path, shell: $0) }
+        }
 
         view = TerminalView(frame: .zero)
         controller = TerminalController(theme: theme.terminalTheme()) { builder in
@@ -56,18 +62,65 @@ final class TerminalSession {
             builder.withCursorStyleBlink(true)
             builder.withWindowPaddingX(8)
             builder.withWindowPaddingY(8)
+            if let replay {
+                // 명령을 바꾸면 ghostty가 셸 종류를 알아내지 못해 셸 통합이
+                // 꺼진다. 어떤 셸인지 직접 알려 줘야 프롬프트 경계·pwd·종료
+                // 코드가 계속 들어온다.
+                builder.withCustom("shell-integration", replay.shell.integration)
+            }
         }
 
         var options = TerminalSurfaceOptions()
         options.workingDirectory = workingDirectory
         // Tag child processes so external tools can correlate them back to
         // this pane (useful once blocks/sessions land).
-        options.envVars = environment.merging(["MYTERMINAL_PANE": id.uuidString]) { current, _ in
+        var env = environment.merging(["MYTERMINAL_PANE": id.uuidString]) { current, _ in
             current
         }
+        if let replay {
+            // 경로는 명령 문자열이 아니라 환경변수로 넘긴다. Application
+            // Support 경로에는 공백이 있어서 명령에 박으면 단어가 갈린다.
+            env["MYTERMINAL_RESTORE"] = replay.path
+            env["MYTERMINAL_SHELL"] = replay.shell.path
+            options.command =
+                #"/bin/sh -c 'cat "$MYTERMINAL_RESTORE" 2>/dev/null; exec "$MYTERMINAL_SHELL" -l'"#
+        }
+        options.envVars = env
         view.configuration = options
         view.controller = controller
         view.delegate = self
+    }
+
+    /// 화면에 떠 있는 글자를 평문으로 뜬다.
+    ///
+    /// 클립보드를 거치는 것은 취향이 아니라 유일한 길이다. libghostty의 텍스트
+    /// 읽기 API는 패키지 밖으로 열려 있지 않고, 클립보드 쓰기 콜백도 곧장
+    /// `NSPasteboard.general`로 쓰기 때문에 가로챌 자리가 없다. 그래서 앞뒤로
+    /// 클립보드를 보관했다 되돌린다 — 종료 직전에 복사해 둔 것을 이 기능이
+    /// 훔쳐 가면 안 된다.
+    func snapshot() -> String? {
+        let pasteboard = NSPasteboard.general
+        let saved: [NSPasteboardItem] = pasteboard.pasteboardItems?.map { item in
+            let copy = NSPasteboardItem()
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    copy.setData(data, forType: type)
+                }
+            }
+            return copy
+        } ?? []
+
+        defer {
+            pasteboard.clearContents()
+            if !saved.isEmpty {
+                pasteboard.writeObjects(saved as [any NSPasteboardWriting])
+            }
+        }
+
+        guard view.performBindingAction("select_all"), view.copySelectedTextToPasteboard() else {
+            return nil
+        }
+        return pasteboard.string(forType: .string)
     }
 
     // MARK: - Fan-out from the window controller

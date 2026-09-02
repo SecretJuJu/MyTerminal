@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let projectStore = ProjectStore()
     private let workspaceStore = WorkspaceStore()
+    private let snapshotStore = SessionSnapshotStore()
     /// A sheet is owned by nobody else while it is up; without this it would
     /// be released the moment the presenting call returns.
     private var activeSheet: FormSheet?
@@ -30,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_: Notification) {
+        // 화면을 먼저 뜬다. 창이 사라진 뒤에는 읽을 surface가 없다.
+        for controller in windows {
+            controller.captureSnapshots(into: snapshotStore)
+        }
         // 예약해 둔 저장을 기다릴 시간이 없다. 마지막 배치를 바로 쓴다.
         workspaceStore.flush(currentWorkspace())
     }
@@ -77,6 +82,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         Log.info("workspace restored — \(windows.count) window(s)")
         if windows.isEmpty { newWindow(self) }
+
+        // 배치에 없는 pane의 화면 기록은 다시 쓸 일이 없다.
+        snapshotStore.discardOrphans(
+            keeping: windows.reduce(into: Set<UUID>()) { $0.formUnion($1.knownSessionIDs) }
+        )
+    }
+
+    /// 창이 pane을 깨울 때 되찍을 파일을 물어본다.
+    func snapshotPath(for id: UUID) -> String? {
+        snapshotStore.path(for: id)
     }
 
     /// 창이 탭·분할·크기를 바꿀 때마다 부른다. 저장은 `WorkspaceStore`가
