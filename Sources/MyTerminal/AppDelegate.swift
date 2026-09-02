@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let tabShortcutCount = 9
 
     private let projectStore = ProjectStore()
+    private let workspaceStore = WorkspaceStore()
     /// A sheet is owned by nobody else while it is up; without this it would
     /// be released the moment the presenting call returns.
     private var activeSheet: FormSheet?
@@ -24,8 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_: Notification) {
         Log.info("launched — building menu and opening first window")
         NSApp.mainMenu = buildMainMenu()
-        newWindow(self)
+        restoreWorkspace()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationWillTerminate(_: Notification) {
+        // 예약해 둔 저장을 기다릴 시간이 없다. 마지막 배치를 바로 쓴다.
+        workspaceStore.flush(currentWorkspace())
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
@@ -54,6 +60,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func windowControllerDidClose(_ controller: TerminalWindowController) {
         windows.removeAll { $0 === controller }
+        workspaceDidChange()
+    }
+
+    /// 저장해 둔 창을 되살린다. 저장한 것이 없거나 되살릴 게 남지 않았으면
+    /// 평소대로 빈 창 하나로 시작한다.
+    private func restoreWorkspace() {
+        guard let state = workspaceStore.load(), !state.windows.isEmpty else {
+            newWindow(self)
+            return
+        }
+        for saved in state.windows {
+            let controller = makeWindow()
+            controller.restore(saved)
+            controller.showWindow(nil)
+        }
+        Log.info("workspace restored — \(windows.count) window(s)")
+        if windows.isEmpty { newWindow(self) }
+    }
+
+    /// 창이 탭·분할·크기를 바꿀 때마다 부른다. 저장은 `WorkspaceStore`가
+    /// 잠깐 모았다 한 번에 한다.
+    func workspaceDidChange() {
+        workspaceStore.save(currentWorkspace())
+    }
+
+    private func currentWorkspace() -> WorkspaceState {
+        WorkspaceState(windows: windows.map { $0.snapshotState() })
     }
 
     // MARK: - Actions

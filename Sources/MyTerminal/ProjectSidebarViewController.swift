@@ -2,7 +2,7 @@ import AppKit
 
 /// 사이드바에서 고를 수 있는 대상. `home`은 프로젝트에 속하지 않은
 /// 기본 셸이다 — 프로젝트를 하나도 안 만든 사람에게는 이게 앱의 전부다.
-enum SidebarSelection: Hashable {
+enum SidebarSelection: Hashable, Codable {
     case home
     case project(UUID)
 }

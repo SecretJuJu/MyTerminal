@@ -23,6 +23,9 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     private var projects: [Project] = []
     private var fontSize: Float
     private var theme: AppTheme
+    /// 복원한 탭 중 아직 셸을 띄우지 않은 pane의 정보. 탭을 처음 열 때 꺼내
+    /// 쓴다 — 탭 스무 개를 되살리면서 셸 스무 개를 한꺼번에 띄우지 않는다.
+    private var dormantSessions: [UUID: WorkspaceState.Session] = [:]
 
     init(fontSize: Float, theme: AppTheme, projects: [Project]) {
         self.fontSize = fontSize
@@ -337,20 +340,23 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
 
     private func makeSession(
         for selection: SidebarSelection,
+        id: UUID = UUID(),
         workingDirectory: String? = nil
     ) -> TerminalSession? {
         let session: TerminalSession
         switch selection {
         case .home:
             session = TerminalSession(
+                id: id,
                 workingDirectory: workingDirectory,
                 environment: [:],
                 fontSize: fontSize,
                 theme: theme
             )
-        case let .project(id):
-            guard let project = projects.first(where: { $0.id == id }) else { return nil }
+        case let .project(projectID):
+            guard let project = projects.first(where: { $0.id == projectID }) else { return nil }
             session = TerminalSession(
+                id: id,
                 workingDirectory: workingDirectory ?? project.directory,
                 environment: [
                     "MYTERMINAL_PROJECT": project.name,
@@ -366,10 +372,28 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         return session
     }
 
+    /// 복원한 탭을 처음 열 때 그 탭의 셸을 띄운다. 저장해 둔 아이디를 그대로
+    /// 살려야 화면 스냅샷이 같은 pane으로 돌아간다.
+    private func wakeSessions(for tab: TerminalTab, in selection: SidebarSelection) {
+        for id in tab.sessions where sessions[id] == nil {
+            let saved = dormantSessions.removeValue(forKey: id)
+            _ = makeSession(
+                for: selection,
+                id: id,
+                workingDirectory: saved?.workingDirectory
+            )
+        }
+    }
+
     /// 화면을 모델에 맞춘다. 탭·분할이 바뀔 때마다 여기 한 번만 들르면 된다.
     private func syncViews() {
         let group = groups[activeSelection] ?? TabGroup()
         let colors = theme.chrome(systemIsDark: windowIsDark)
+
+        // 보이는 탭의 셸만 띄운다. 나머지는 배치만 들고 기다린다.
+        if let active = group.activeTab {
+            wakeSessions(for: active, in: activeSelection)
+        }
 
         for tab in group.tabs {
             let view = tabView(for: tab.id)
@@ -393,6 +417,61 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         // 탭이 하나면 탭바를 감춘다 — 탭을 안 쓰는 사람에게는 그냥 터미널이다.
         tabBar.isHidden = group.tabs.count < 2
         window?.title = windowTitle(for: group)
+        (NSApp.delegate as? AppDelegate)?.workspaceDidChange()
+    }
+
+    // MARK: - 배치 저장·복원
+
+    func snapshotState() -> WorkspaceState.Window {
+        let frame = window?.frame ?? .zero
+        return WorkspaceState.Window(
+            frame: WorkspaceState.Frame(
+                x: frame.origin.x,
+                y: frame.origin.y,
+                width: frame.width,
+                height: frame.height
+            ),
+            activeSelection: activeSelection,
+            groups: groups.map { WorkspaceState.Group(selection: $0.key, tabs: $0.value) },
+            sessions: sessionStates()
+        )
+    }
+
+    /// 살아 있는 셸과 아직 안 깨운 pane을 함께 담는다. 안 깨운 쪽을 빼면
+    /// 켜자마자 다시 끄는 것만으로 열어 두었던 탭이 사라진다.
+    private func sessionStates() -> [WorkspaceState.Session] {
+        let live = sessions.values.map {
+            WorkspaceState.Session(
+                id: $0.id,
+                workingDirectory: $0.workingDirectory,
+                title: $0.title
+            )
+        }
+        return live + dormantSessions.values.filter { sessions[$0.id] == nil }
+    }
+
+    /// 저장해 둔 창을 되살린다. 사라진 프로젝트의 탭은 버린다.
+    func restore(_ state: WorkspaceState.Window) {
+        let live = Set(projects.map(\.id))
+        for group in state.groups {
+            if case let .project(id) = group.selection, !live.contains(id) { continue }
+            groups[group.selection] = group.tabs
+        }
+        for session in state.sessions {
+            dormantSessions[session.id] = session
+        }
+
+        activeSelection = groups[state.activeSelection] == nil ? .home : state.activeSelection
+        let frame = NSRect(
+            x: state.frame.x,
+            y: state.frame.y,
+            width: state.frame.width,
+            height: state.frame.height
+        )
+        if frame.width > 200, frame.height > 200 {
+            window?.setFrame(frame, display: false)
+        }
+        sidebar.reload(projects: projects, selection: activeSelection)
     }
 
     private func tabView(for tabID: UUID) -> SplitLayoutView {
@@ -515,6 +594,14 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_: Notification) {
         (NSApp.delegate as? AppDelegate)?.windowControllerDidClose(self)
+    }
+
+    func windowDidResize(_: Notification) {
+        (NSApp.delegate as? AppDelegate)?.workspaceDidChange()
+    }
+
+    func windowDidMove(_: Notification) {
+        (NSApp.delegate as? AppDelegate)?.workspaceDidChange()
     }
 }
 

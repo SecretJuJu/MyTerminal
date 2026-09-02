@@ -10,13 +10,17 @@ import AppKit
 @MainActor
 final class SplitLayoutView: NSView {
     private var installedLayout: SplitTree<UUID>?
+    /// 실제로 화면에 올라간 pane. 배치가 그대로여도 세션이 나중에 생기는
+    /// 경우가 있어서(복원한 탭은 처음 열 때 셸을 띄운다) 따로 본다.
+    private var renderedPanes: Set<UUID> = []
     private var panes: [UUID: PaneContainerView] = [:]
     private var colors: ChromeColors = AppTheme.ghosttyDefault.chrome(systemIsDark: false)
 
-    /// 배치를 반영한다. 구조가 그대로면 다시 만들지 않는다 — 다시 만들면
-    /// 사용자가 끌어 놓은 분할선 위치가 매번 초기화된다.
+    /// 배치를 반영한다. 구조와 올라간 pane이 그대로면 다시 만들지 않는다 —
+    /// 다시 만들면 사용자가 끌어 놓은 분할선 위치가 매번 초기화된다.
     func apply(layout: SplitTree<UUID>, sessions: [UUID: TerminalSession], focused: UUID?) {
-        if installedLayout != layout {
+        let available = Set(layout.leaves.filter { sessions[$0] != nil })
+        if installedLayout != layout || renderedPanes != available {
             installedLayout = layout
             rebuild(layout, sessions: sessions)
         }
@@ -50,6 +54,7 @@ final class SplitLayoutView: NSView {
         for subview in subviews {
             subview.removeFromSuperview()
         }
+        renderedPanes = Set(layout.leaves.filter { sessions[$0] != nil })
         guard let root = makeView(for: layout, sessions: sessions) else { return }
         root.translatesAutoresizingMaskIntoConstraints = false
         addSubview(root)
