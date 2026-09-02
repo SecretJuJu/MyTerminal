@@ -12,8 +12,11 @@ enum FontPreferences {
     private static let monoCandidates = [
         "JetBrains Mono",
         "JetBrainsMono Nerd Font",
+        "MonoplexKR Nerd",
         "Maple Mono NF",
+        "Sarasa Term K",
         "FiraCode Nerd Font",
+        "D2Coding",
         "Menlo",
     ]
 
@@ -21,12 +24,28 @@ enum FontPreferences {
     /// 폭으로 설계돼 있다. Apple SD Gothic Neo 같은 가변폭 UI 폰트는 여기
     /// 넣지 않는다 — 없으면 매핑을 걸지 않고 CoreText 폴백에 맡기는 편이
     /// 낫고, 그 폴백이 어차피 SD Gothic Neo다.
+    ///
+    /// 이름은 배포판마다 다르게 등록된다(D2Coding은 설치 경로에 따라
+    /// `D2Coding`/`D2CodingLigature`, Sarasa는 폭 방식마다 Mono/Term/Fixed로
+    /// 갈린다). 그래서 같은 폰트라도 알려진 이름을 모두 적어 둔다.
     private static let hangulCandidates = [
         "D2Coding",
+        "D2CodingLigature",
         "D2Coding ligature",
+        "MonoplexKR",
+        "MonoplexKR Nerd",
+        "Sarasa Mono K",
+        "Sarasa Term K",
+        "Sarasa Fixed K",
+        "Sarasa Gothic K",
         "Noto Sans Mono CJK KR",
         "NanumGothicCoding",
+        "Nanum Gothic Coding",
     ]
+
+    /// 하나도 없을 때 로그에 남길 안내. 자동 설치는 하지 않는다 — 사용자의
+    /// 시스템에 폰트를 얹는 일까지 앱이 대신할 자리는 아니다.
+    private static let installHint = "brew install --cask font-d2coding"
 
     /// 한글 + 전각 문자 전용으로 매핑할 유니코드 범위.
     /// Ghostty 범위의 양쪽 끝은 모두 `U+` 접두사가 필요하다.
@@ -57,6 +76,11 @@ enum FontPreferences {
         builder.withFontThicken(true)
 
         Log.info("font: \(mono), hangul map: \(hangul ?? "system fallback")")
+        if hangul == nil {
+            // 폴백(Apple SD Gothic Neo)은 한글 한 글자가 라틴 두 칸보다 좁아
+            // 한글이 섞인 줄에서 열이 어긋난다. 코딩용 한글 폰트를 깔면 사라진다.
+            Log.info("hangul: 한글 코딩 폰트가 없어 열이 어긋날 수 있습니다 — \(installHint)")
+        }
     }
 
     /// 한글 한 글자가 기본 폰트의 정확히 두 칸을 차지하는지 본다.
@@ -73,9 +97,15 @@ enum FontPreferences {
             let hangulFont = NSFont(name: hangul, size: size)
         else { return false }
 
-        let cell = ("M" as NSString).size(withAttributes: [.font: monoFont]).width
-        let syllable = ("가" as NSString).size(withAttributes: [.font: hangulFont]).width
-        guard cell > 0 else { return false }
-        return abs(syllable - cell * 2) <= cell * 0.05
+        return fitsCellGrid(
+            hangulWidth: ("가" as NSString).size(withAttributes: [.font: hangulFont]).width,
+            cellWidth: ("M" as NSString).size(withAttributes: [.font: monoFont]).width
+        )
+    }
+
+    /// 판정만 떼어 둔 자리. 설치된 폰트에 기대지 않고 검증할 수 있다.
+    static func fitsCellGrid(hangulWidth: CGFloat, cellWidth: CGFloat) -> Bool {
+        guard cellWidth > 0, hangulWidth > 0 else { return false }
+        return abs(hangulWidth - cellWidth * 2) <= cellWidth * 0.05
     }
 }
