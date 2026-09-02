@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MyTerminal 앱 아이콘 원본.
+
+  Nocturne(시그니처 다크 팔레트) 판 위에 프롬프트 꺾쇠와 커서를 얹고, 오른쪽에
+  나뉜 pane을 옅은 면으로 세웠다. 형태를 셋으로 줄인 이유는 16px에서도 남는
+  것이 그만큼이기 때문이다 — 선으로 그리면 그 크기에서 흠집처럼 보인다.
+
+  굽는 방법은 Support/make-icon.swift 참고.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#1C2639"/>
+      <stop offset="0.55" stop-color="#111828"/>
+      <stop offset="1" stop-color="#080B12"/>
+    </linearGradient>
+
+    <linearGradient id="chevron" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8AB4FF"/>
+      <stop offset="1" stop-color="#7DE1FF"/>
+    </linearGradient>
+
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.24"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.12"/>
+    </linearGradient>
+
+    <radialGradient id="glow" cx="0.34" cy="0.38" r="0.6">
+      <stop offset="0" stop-color="#5B8CFF" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#5B8CFF" stop-opacity="0"/>
+    </radialGradient>
+
+    <clipPath id="plateClip">
+      <rect x="72" y="72" width="880" height="880" rx="212" ry="212"/>
+    </clipPath>
+  </defs>
+
+  <rect x="72" y="72" width="880" height="880" rx="212" ry="212" fill="url(#plate)"/>
+
+  <!-- 위에서 들어오는 빛. 판 안쪽만 칠한다. -->
+  <g clip-path="url(#plateClip)">
+    <rect x="72" y="72" width="880" height="880" fill="url(#glow)"/>
+    <path d="M72 72 H952 V296 C704 206 384 232 72 368 Z" fill="#FFFFFF" opacity="0.05"/>
+  </g>
+
+  <!-- 나뉜 pane. 테두리 없이 밝기만 다르게 둔다 — 사각형을 그려 넣으면
+       작은 크기에서 아이콘 안에 딴 물건이 얹힌 것처럼 보인다. -->
+  <g clip-path="url(#plateClip)">
+    <rect x="730" y="72" width="222" height="880" fill="#FFFFFF" fill-opacity="0.05"/>
+    <rect x="728" y="72" width="4" height="880" fill="#FFFFFF" fill-opacity="0.07"/>
+  </g>
+
+  <!-- 프롬프트 -->
+  <path d="M350 372 L502 512 L350 652" fill="none" stroke="url(#chevron)"
+        stroke-width="80" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 커서 -->
+  <rect x="558" y="638" width="150" height="54" rx="27" ry="27" fill="#9BE07A"/>
+
+  <rect x="72" y="72" width="880" height="880" rx="212" ry="212"
+        fill="none" stroke="url(#rim)" stroke-width="6"/>
+</svg>

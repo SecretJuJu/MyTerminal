@@ -17,7 +17,13 @@ make bundle
 open MyTerminal.app
 ```
 
-번들은 실행 파일과 Ghostty의 셸 인테그레이션·terminfo 리소스를 함께 넣는다. 기본 셸은 로그인 셸이며, 창을 모두 닫으면 앱도 종료한다.
+번들은 실행 파일과 Ghostty의 셸 인테그레이션·terminfo 리소스, 앱 아이콘을 함께 넣는다. 기본 셸은 로그인 셸이며, 창을 모두 닫으면 앱도 종료한다.
+
+아이콘 원본은 `Support/AppIcon.svg`이고 구운 결과(`Support/AppIcon.icns`)는 저장소에 들어 있다. 원본을 고쳤을 때만 다시 굽는다.
+
+```sh
+make icon
+```
 
 ## 프로젝트
 
