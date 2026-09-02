@@ -7,6 +7,8 @@ import Foundation
 struct AppSettings: Codable, Hashable, Sendable {
     var theme: String
     var fontSize: Float
+    /// 입력 상자를 쓸지. 이 설정이 없던 시절의 파일도 읽히도록 옵션이다.
+    var composerEnabled: Bool?
 
     /// 모르는 이름이면 기본 테마로 떨어뜨린다. 테마 case 이름을 바꾸거나
     /// 사용자가 파일을 손댔을 때 앱이 뜨지 못하면 안 된다.

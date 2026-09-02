@@ -26,13 +26,23 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     /// 복원한 탭 중 아직 셸을 띄우지 않은 pane의 정보. 탭을 처음 열 때 꺼내
     /// 쓴다 — 탭 스무 개를 되살리면서 셸 스무 개를 한꺼번에 띄우지 않는다.
     private var dormantSessions: [UUID: WorkspaceState.Session] = [:]
+    private let composer = CommandComposerView()
+    /// pane마다 쓰다 만 글을 따로 들고 있다. 상자는 창에 하나뿐이라 포커스가
+    /// 옮겨 갈 때 이 사전에서 꺼내 넣는다.
+    private var drafts: [UUID: String] = [:]
+    private var history = CommandHistory()
+    /// Esc로 터미널로 나간 상태. 그때는 글자를 쳐도 상자로 돌리지 않는다 —
+    /// vim처럼 화면 전체를 쓰는 도구를 쓰려고 나간 것이기 때문이다.
+    private var typingRedirectSuspended = false
+    /// 우리가 보낸 명령이 아직 끝나지 않았다. 그동안 키는 터미널로 간다.
+    private var runningCommands: Set<UUID> = []
 
     init(fontSize: Float, theme: AppTheme, projects: [Project]) {
         self.fontSize = fontSize
         self.theme = theme
         self.projects = projects
 
-        let window = NSWindow(
+        let window = TerminalHostWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1080, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
@@ -67,6 +77,10 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         tabBar.onSelect = { [weak self] tabID in self?.selectTab(id: tabID) }
         tabBar.onClose = { [weak self] tabID in self?.closeTab(id: tabID, in: nil) }
         tabBar.onNew = { [weak self] in self?.openTab() }
+        window.interceptKeyDown = { [weak self] event in
+            self?.redirectTypingToComposer(event) ?? false
+        }
+        wireComposer()
         applyChrome()
         sidebar.reload(projects: projects, selection: activeSelection)
     }
@@ -301,8 +315,138 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         window?.close()
     }
 
+    // MARK: - 입력 상자
+
+    private func wireComposer() {
+        composer.onSubmit = { [weak self] text in self?.submitFromComposer(text) }
+        composer.onLeave = { [weak self] in self?.leaveComposer() }
+        composer.onForwardKey = { [weak self] event in self?.forwardToTerminal(event) }
+        composer.onHistoryStep = { [weak self] step in
+            guard let self else { return nil }
+            return history.step(step, current: composer.text)
+        }
+        composer.onTextChange = { [weak self] text in
+            guard let self, let id = groups[activeSelection]?.activeTab?.focus else { return }
+            drafts[id] = text.isEmpty ? nil : text
+            (NSApp.delegate as? AppDelegate)?.workspaceDidChange()
+        }
+    }
+
+    /// 상자에 쓴 것을 셸로 보낸다. 붙여넣기로 넣고 Return을 따로 보낸다 —
+    /// 여러 줄이 한 덩어리로 들어가야 첫 줄만 실행되는 일이 없다(bracketed
+    /// paste). 바이트는 순서대로 흐르므로 사이에 기다릴 필요가 없다.
+    private func submitFromComposer(_ text: String) {
+        guard let session = activeSession else { return }
+        if !text.isEmpty {
+            session.view.sendText(text)
+            history.record(text)
+            runningCommands.insert(session.id)
+        }
+        sendReturn(to: session)
+        drafts[session.id] = nil
+        (NSApp.delegate as? AppDelegate)?.workspaceDidChange()
+    }
+
+    private func sendReturn(to session: TerminalSession) {
+        guard
+            let window,
+            let event = NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: "\r",
+                charactersIgnoringModifiers: "\r",
+                isARepeat: false,
+                keyCode: 36
+            )
+        else { return }
+        session.view.keyDown(with: event)
+    }
+
+    /// Esc. 다음 타이핑이 상자로 끌려오지 않게 표시해 둔다.
+    private func leaveComposer() {
+        typingRedirectSuspended = true
+        focusActivePane()
+    }
+
+    /// 상자를 켜거나 끈 뒤 화면을 다시 맞춘다.
+    func reloadComposer() {
+        syncViews()
+        if !composerEnabled { focusActivePane() }
+    }
+
+    func focusComposer() {
+        guard composerEnabled else { return }
+        typingRedirectSuspended = false
+        composer.focus()
+    }
+
+    private func forwardToTerminal(_ event: NSEvent) {
+        guard let session = activeSession else { return }
+        session.view.keyDown(with: event)
+    }
+
+    /// 터미널에 포커스가 있는데 사용자가 글자를 치기 시작하면 상자로 돌린다.
+    ///
+    /// 돌리지 않는 경우가 셋이다. 상자를 껐을 때, Esc로 터미널을 쓰겠다고
+    /// 나갔을 때, 그리고 우리가 보낸 명령이 아직 돌고 있을 때다. 셋째가
+    /// 중요하다 — 상자에서 `vim`을 띄웠으면 그다음 키는 vim이 받아야 한다.
+    private func redirectTypingToComposer(_ event: NSEvent) -> Bool {
+        guard composerEnabled, !typingRedirectSuspended else { return false }
+        guard let session = activeSession else { return false }
+        guard !runningCommands.contains(session.id) else { return false }
+        guard window?.firstResponder === session.view else { return false }
+
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard !flags.contains(.command), !flags.contains(.control) else { return false }
+        guard let characters = event.characters, let scalar = characters.unicodeScalars.first
+        else { return false }
+        // 방향키·기능키는 characters가 사용자 영역(0xF700~)으로 온다. Return과
+        // Tab, Esc는 셸이 받아야 하므로 제어문자도 그대로 흘려보낸다.
+        guard scalar.value < 0xF700, !CharacterSet.controlCharacters.contains(scalar) else {
+            return false
+        }
+
+        composer.beginTyping(with: event)
+        return true
+    }
+
+    private var composerEnabled: Bool {
+        (NSApp.delegate as? AppDelegate)?.isComposerEnabled ?? true
+    }
+
+    /// 상자를 포커스한 pane 아래로 옮겨 붙이고, 그 pane의 쓰다 만 글을 넣는다.
+    private func syncComposer(for group: TabGroup) {
+        let focus = group.activeTab?.focus
+        for (tabID, view) in tabViews {
+            view.attachComposer(
+                tabID == group.activeTabID && composerEnabled ? composer : nil,
+                to: tabID == group.activeTabID ? focus : nil
+            )
+        }
+        guard composerEnabled else { return }
+        composer.apply(colors: theme.chrome(systemIsDark: windowIsDark))
+        composer.applyFontSize(fontSize)
+
+        let draft = focus.flatMap { drafts[$0] } ?? ""
+        if composer.text != draft, !composer.isFocused {
+            composer.text = draft
+            history.endRecall()
+        }
+    }
+
     func pasteFromClipboard() {
-        activeSession?.pasteFromClipboard()
+        // 상자가 있으면 붙여넣기는 상자로 간다. 여러 줄을 붙였을 때 바로
+        // 실행되는 사고를 막고, 보고 고친 뒤 ⏎를 누를 수 있다.
+        guard composerEnabled, let text = NSPasteboard.general.string(forType: .string) else {
+            activeSession?.pasteFromClipboard()
+            return
+        }
+        focusComposer()
+        composer.text = composer.text.isEmpty ? text : composer.text + text
     }
 
     func clearScreen() {
@@ -436,6 +580,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
             session.setVisible(drawing.contains(id))
         }
 
+        syncComposer(for: group)
         tabBar.reload(group)
         // 탭이 하나면 탭바를 감춘다 — 탭을 안 쓰는 사람에게는 그냥 터미널이다.
         tabBar.isHidden = group.tabs.count < 2
@@ -456,7 +601,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
             ),
             activeSelection: activeSelection,
             groups: groups.map { WorkspaceState.Group(selection: $0.key, tabs: $0.value) },
-            sessions: sessionStates()
+            sessions: sessionStates(),
+            composerHistory: history.entries
         )
     }
 
@@ -467,7 +613,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
             WorkspaceState.Session(
                 id: $0.id,
                 workingDirectory: $0.workingDirectory,
-                title: $0.title
+                title: $0.title,
+                draft: drafts[$0.id]
             )
         }
         return live + dormantSessions.values.filter { sessions[$0.id] == nil }
@@ -482,7 +629,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
         }
         for session in state.sessions {
             dormantSessions[session.id] = session
+            if let draft = session.draft, !draft.isEmpty {
+                drafts[session.id] = draft
+            }
         }
+        history = CommandHistory(entries: state.composerHistory ?? [])
 
         activeSelection = groups[state.activeSelection] == nil ? .home : state.activeSelection
         let frame = NSRect(
@@ -576,6 +727,8 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     private func discard(sessionIDs: [UUID]) {
         for id in sessionIDs {
             sessions.removeValue(forKey: id)?.setVisible(false)
+            drafts.removeValue(forKey: id)
+            runningCommands.remove(id)
         }
     }
 
@@ -655,6 +808,8 @@ extension TerminalWindowController: TerminalSessionDelegate {
     /// 아무 일도 하지 않는다 — 포커스 이벤트는 창을 다시 누를 때도 오므로
     /// 매번 화면을 다시 맞추면 헛일이 잦다.
     func sessionDidTakeFocus(_ session: TerminalSession) {
+        // pane을 클릭해 옮겨 갔으면 그 pane에서는 다시 상자로 끌어온다.
+        typingRedirectSuspended = false
         guard let selection = selection(holding: session.id), selection == activeSelection else {
             return
         }
@@ -662,6 +817,10 @@ extension TerminalWindowController: TerminalSessionDelegate {
         group.focus(session.id)
         groups[selection] = group
         syncViews()
+    }
+
+    func sessionDidFinishCommand(_ session: TerminalSession) {
+        runningCommands.remove(session.id)
     }
 
     func sessionDidClose(_ session: TerminalSession) {

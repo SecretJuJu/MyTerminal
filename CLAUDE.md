@@ -75,6 +75,16 @@ A project is a directory (default `~/MyTerminal/<name>`) holding one git worktre
 - pane 포커스는 `TerminalSurfaceFocusDelegate`로 따라간다. 포커스를 얻은 쪽만 반영하고 잃은 쪽은 무시한다 — 창이 키를 잃을 때도 같은 값이 오므로, 그걸로 활성 pane을 지우면 창을 다시 눌렀을 때 어디가 활성이었는지 잊는다.
 - 방향키 pane 이동은 좌표가 아니라 트리 구조로 이웃을 고른다(`SplitTree.neighbor`). 세 겹 이상 뒤섞인 배치에서는 사람이 기대한 pane과 다를 수 있고, 그때는 프레임 기반으로 바꿔야 한다.
 
+### Command composer
+
+pane 아래에 붙는 `CommandComposerView`가 셸의 줄 편집을 대신한다. 실행은 두 단계다 — `session.view.sendText(text)`로 붙여넣고(bracketed paste라 여러 줄이 한 덩어리로 들어간다) 곧바로 합성한 Return `keyDown`을 보낸다. 사이에 기다릴 필요는 없다: PTY로 나가는 바이트는 순서가 보장되므로 셸이 붙여넣기를 다 읽은 뒤 Return을 본다. 실측으로 `echo AAA\necho BBB`가 두 줄 다 실행됨을 확인했다.
+
+- 상자는 창에 하나뿐이고 포커스한 pane 아래로 옮겨 붙는다(`SplitLayoutView.attachComposer`). pane마다 쓰다 만 글은 창이 `drafts`로 따로 들고 있다가 포커스가 옮겨 갈 때 넣어 준다.
+- **타이핑 가로채기는 `TerminalHostWindow.sendEvent`에서 한다.** responder chain보다 앞이어야 첫 글자를 놓치지 않는다 — 터미널 뷰가 키를 먹은 뒤에는 되돌릴 자리가 없고, 한글은 첫 자모를 놓치면 조합이 깨진다.
+- 가로채지 않는 경우가 셋이다: 상자를 껐을 때, Esc로 나갔을 때(`typingRedirectSuspended`), 그리고 우리가 보낸 명령이 아직 돌고 있을 때(`runningCommands`). 셋째가 vim·htop을 살린다. 이 신호는 `terminalDidFinishCommand` 하나뿐이므로 `TerminalSession`이 그 이벤트를 반드시 창까지 전달해야 한다 — 전달을 빼먹으면 첫 명령 이후 타이핑이 영구히 터미널로만 간다(실제로 한 번 그랬다).
+- 상자가 셸로 그대로 넘기는 키는 ⌃C·⌃D·⌃Z·⌃R·⌃L·⌃\와 (상자가 비었을 때의) Tab이다. 나머지 제어키는 글 편집에 쓰이므로 상자가 갖는다. 프롬프트가 떴는지 알려 주는 이벤트가 패키지에 없어서, 이 목록이 "셸에 있어야 하는 키"를 대신한다.
+- 상자를 켤지는 `SettingsStore`에, 히스토리와 쓰다 만 글은 `workspace.json`에 남는다. 히스토리 규칙(연속 중복 제거·상한·되부르기 커서)은 `CommandHistory`에 값 타입으로 떼어 두어 화면 없이 검증한다.
+
 ### Restart: layout and screen contents
 
 두 가지를 따로 저장한다. **배치**는 `workspace.json`(창 크기, 사이드바 선택, 탭 목록, 분할 트리, pane별 작업 디렉터리), **화면에 있던 글자**는 `sessions/<paneID>.txt`다. 세션 아이디를 저장하는 이유가 이것이다 — 아이디가 유지돼야 화면 기록이 같은 pane으로 돌아간다.

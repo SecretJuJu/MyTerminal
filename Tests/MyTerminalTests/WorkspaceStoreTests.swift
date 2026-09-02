@@ -20,9 +20,11 @@ struct WorkspaceStoreTests {
                     WorkspaceState.Session(
                         id: session,
                         workingDirectory: "/tmp",
-                        title: tabTitle
+                        title: tabTitle,
+                        draft: "쓰다 만 명령"
                     ),
-                ]
+                ],
+                composerHistory: ["git status", "make test"]
             ),
         ])
     }
@@ -47,6 +49,9 @@ struct WorkspaceStoreTests {
 
         // #then
         #expect(loaded == state)
+        // 상자에 쓰다 만 글과 히스토리도 같이 돌아온다.
+        #expect(loaded?.windows.first?.sessions.first?.draft == "쓰다 만 명령")
+        #expect(loaded?.windows.first?.composerHistory == ["git status", "make test"])
     }
 
     @Test("저장한 적이 없거나 파일이 깨졌으면 아무것도 돌려주지 않는다")

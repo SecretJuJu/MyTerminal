@@ -58,10 +58,17 @@ enum FontPreferences {
         "U+FF00-U+FFEF", // 전각 형식 (CJK 문장부호·전각 영숫자)
     ]
 
+    /// 터미널이 쓰는 기본 모노폰트. 입력 상자도 같은 것을 써야 글자 폭이
+    /// 터미널과 어긋나지 않는다.
+    static func monoFamily() -> String {
+        let families = Set(NSFontManager.shared.availableFontFamilies)
+        return monoCandidates.first { families.contains($0) } ?? "Menlo"
+    }
+
     static func apply(to builder: inout TerminalConfiguration.Builder) {
         let families = Set(NSFontManager.shared.availableFontFamilies)
 
-        let mono = monoCandidates.first { families.contains($0) } ?? "Menlo"
+        let mono = monoFamily()
         builder.withFontFamily(mono)
 
         let hangul = hangulCandidates.first {

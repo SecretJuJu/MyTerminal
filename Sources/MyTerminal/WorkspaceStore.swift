@@ -12,6 +12,8 @@ struct WorkspaceState: Codable, Hashable, Sendable {
         var activeSelection: SidebarSelection
         var groups: [Group]
         var sessions: [Session]
+        /// 입력 상자가 보낸 명령 목록. 없던 시절에 쓴 파일도 읽히도록 옵션이다.
+        var composerHistory: [String]?
     }
 
     /// 사이드바 선택 하나와 거기 딸린 탭들. 사전 대신 배열로 두는 이유는
@@ -27,6 +29,8 @@ struct WorkspaceState: Codable, Hashable, Sendable {
         var id: UUID
         var workingDirectory: String?
         var title: String
+        /// 상자에 쓰다 만 글. 실행하지 않았어도 다음 실행까지 남는다.
+        var draft: String?
     }
 
     struct Frame: Codable, Hashable, Sendable {

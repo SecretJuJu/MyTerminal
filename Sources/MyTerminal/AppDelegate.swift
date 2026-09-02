@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var fontSize: Float = AppDelegate.defaultFontSize
     private var theme: AppTheme = .ghosttyDefault
     private var themeSubmenu: NSMenu?
+    private var composerMenuItem: NSMenuItem?
     /// 탭 자리를 고르는 ⌘1…⌘9 항목 수.
     private static let tabShortcutCount = 9
 
@@ -18,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let workspaceStore = WorkspaceStore()
     private let snapshotStore = SessionSnapshotStore()
     private let settingsStore = SettingsStore()
+    /// 입력 상자를 쓸지. 설정에 남아 다음 실행에도 유지된다.
+    private(set) var isComposerEnabled = true
     /// A sheet is owned by nobody else while it is up; without this it would
     /// be released the moment the presenting call returns.
     private var activeSheet: FormSheet?
@@ -128,6 +131,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func clearTerminal(_: Any?) {
         keyWindowController()?.clearScreen()
+    }
+
+    /// ⌘L. 상자로 들어간다. 상자를 껐으면 다시 켠다.
+    @objc private func focusComposer(_: Any?) {
+        if !isComposerEnabled { setComposerEnabled(true) }
+        keyWindowController()?.focusComposer()
+    }
+
+    @objc private func toggleComposer(_: Any?) {
+        setComposerEnabled(!isComposerEnabled)
+    }
+
+    private func setComposerEnabled(_ enabled: Bool) {
+        guard enabled != isComposerEnabled else { return }
+        isComposerEnabled = enabled
+        for controller in windows {
+            controller.reloadComposer()
+        }
+        composerMenuItem?.state = enabled ? .on : .off
+        saveSettings()
+        Log.info("composer → \(enabled ? "on" : "off")")
     }
 
     @objc private func jumpToPreviousPrompt(_: Any?) {
@@ -283,7 +307,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ("Select All", NSSelectorFromString("selectAll:"), "a"),
             separator,
             ("Clear Screen", #selector(clearTerminal(_:)), "k"),
+            separator,
+            ("Focus Input Box", #selector(focusComposer(_:)), "l"),
+            ("Use Input Box", #selector(toggleComposer(_:)), "L"),
         ])
+        // 상자를 껐는지 켰는지 체크 표시로 보여 준다. 상태를 들고 있어야 하므로
+        // responder chain에 태우지 않고 직접 받는다.
+        if let item = editMenuItem.submenu?.item(withTitle: "Use Input Box") {
+            item.target = self
+            item.state = isComposerEnabled ? .on : .off
+            composerMenuItem = item
+        }
         mainMenu.addItem(editMenuItem)
 
         let themeMenuItem = NSMenuItem()
@@ -383,6 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func loadSettings() {
         guard let settings = settingsStore.load() else { return }
         theme = settings.resolvedTheme()
+        isComposerEnabled = settings.composerEnabled ?? true
         fontSize = settings.resolvedFontSize(
             minimum: Self.minFontSize,
             maximum: Self.maxFontSize,
@@ -392,7 +427,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func saveSettings() {
-        settingsStore.save(AppSettings(theme: theme.rawValue, fontSize: fontSize))
+        settingsStore.save(AppSettings(
+            theme: theme.rawValue,
+            fontSize: fontSize,
+            composerEnabled: isComposerEnabled
+        ))
     }
 
     // MARK: - Theme

@@ -41,6 +41,16 @@ final class SplitLayoutView: NSView {
         }
     }
 
+    /// 입력 상자를 그 pane 아래에 붙인다. `paneID`가 nil이면 어디에도 붙이지
+    /// 않는다. 상자는 창에 하나뿐이라 포커스가 옮겨 갈 때마다 옮겨 붙는다.
+    func attachComposer(_ composer: NSView?, to paneID: UUID?) {
+        for (id, pane) in panes where id != paneID {
+            pane.attach(nil)
+        }
+        guard let paneID, let pane = panes[paneID] else { return }
+        pane.attach(composer)
+    }
+
     /// 이 배치에서 빠진 pane의 컨테이너를 버린다. 세션 자체를 치우는 것은
     /// 창이 한다 — 여기서는 화면에서만 뗀다.
     func discardPanes(except keep: Set<UUID>) {
@@ -118,17 +128,49 @@ final class SplitLayoutView: NSView {
 @MainActor
 private final class PaneContainerView: NSView {
     private var isFocused = false
+    private let content: NSView
+    /// 터미널의 아래쪽 경계. 입력 상자가 붙으면 상자 위로 올라간다.
+    private var contentBottom: NSLayoutConstraint
+    private weak var composer: NSView?
 
     init(content: NSView) {
+        self.content = content
+        contentBottom = NSLayoutConstraint()
         super.init(frame: .zero)
         wantsLayer = true
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
+        contentBottom = content.bottomAnchor.constraint(equalTo: bottomAnchor)
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: topAnchor),
             content.leadingAnchor.constraint(equalTo: leadingAnchor),
             content.trailingAnchor.constraint(equalTo: trailingAnchor),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor),
+            contentBottom,
+        ])
+    }
+
+    func attach(_ composer: NSView?) {
+        guard self.composer !== composer else { return }
+        if let current = self.composer, current.superview === self {
+            current.removeFromSuperview()
+        }
+        self.composer = composer
+        contentBottom.isActive = false
+
+        guard let composer else {
+            contentBottom = content.bottomAnchor.constraint(equalTo: bottomAnchor)
+            contentBottom.isActive = true
+            return
+        }
+
+        composer.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(composer)
+        contentBottom = content.bottomAnchor.constraint(equalTo: composer.topAnchor)
+        NSLayoutConstraint.activate([
+            contentBottom,
+            composer.leadingAnchor.constraint(equalTo: leadingAnchor),
+            composer.trailingAnchor.constraint(equalTo: trailingAnchor),
+            composer.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
 

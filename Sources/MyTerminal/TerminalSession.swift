@@ -5,6 +5,7 @@ import GhosttyTerminal
 protocol TerminalSessionDelegate: AnyObject {
     func session(_ session: TerminalSession, didChangeTitle title: String)
     func sessionDidTakeFocus(_ session: TerminalSession)
+    func sessionDidFinishCommand(_ session: TerminalSession)
     func sessionDidClose(_ session: TerminalSession)
 }
 
@@ -205,6 +206,9 @@ extension TerminalSession:
     func terminalDidFinishCommand(exitCode: Int?, durationNanos: UInt64) {
         let millis = durationNanos / 1_000_000
         Log.info("command finished exit=\(exitCode.map(String.init) ?? "nil") duration=\(millis)ms")
+        // 상자가 이걸 기다린다. 우리가 보낸 명령이 끝났다는 뜻이라, 여기서
+        // 다시 타이핑을 상자로 끌어온다.
+        delegate?.sessionDidFinishCommand(self)
     }
 
     func terminalDidChangeWorkingDirectory(_ path: String) {
