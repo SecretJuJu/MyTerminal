@@ -318,6 +318,13 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
     // MARK: - 입력 상자
 
     private func wireComposer() {
+        // 셸이 쌓아 둔 히스토리를 밑에 깔아 둔다. 새 창에서도 ↑를 누르면
+        // 어제 친 명령이 나온다.
+        history.seed(ShellHistory.recent())
+        composer.workingDirectory = { [weak self] in
+            self?.activeSession?.workingDirectory
+                ?? FileManager.default.homeDirectoryForCurrentUser.path
+        }
         composer.onSubmit = { [weak self] text in self?.submitFromComposer(text) }
         composer.onLeave = { [weak self] in self?.leaveComposer() }
         composer.onForwardKey = { [weak self] event in self?.forwardToTerminal(event) }
@@ -326,7 +333,11 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
             return history.step(step, current: composer.text)
         }
         composer.onTextChange = { [weak self] text in
-            guard let self, let id = groups[activeSelection]?.activeTab?.focus else { return }
+            guard let self else { return }
+            // 사용자가 직접 고쳤으면 되부르기를 놓는다. 그러지 않으면 다음 ↑가
+            // 새로 친 글이 아니라 아까 훑던 자리에서 이어진다.
+            history.endRecall()
+            guard let id = groups[activeSelection]?.activeTab?.focus else { return }
             drafts[id] = text.isEmpty ? nil : text
             (NSApp.delegate as? AppDelegate)?.workspaceDidChange()
         }
@@ -436,6 +447,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
             composer.text = draft
             history.endRecall()
         }
+        if !composer.isFocused { composer.hideCompletions() }
     }
 
     func pasteFromClipboard() {
@@ -634,6 +646,7 @@ final class TerminalWindowController: NSWindowController, NSWindowDelegate {
             }
         }
         history = CommandHistory(entries: state.composerHistory ?? [])
+        history.seed(ShellHistory.recent())
 
         activeSelection = groups[state.activeSelection] == nil ? .home : state.activeSelection
         let frame = NSRect(

@@ -18,6 +18,8 @@ final class CommandComposerView: NSView {
     /// -1은 지난 입력, +1은 다음 입력. 돌려준 글이 상자에 들어간다.
     var onHistoryStep: ((Int) -> String?)?
     var onTextChange: ((String) -> Void)?
+    /// 완성 후보를 찾을 기준 디렉터리. 셸이 알려 준 pwd를 창이 넣어 준다.
+    var workingDirectory: () -> String = { FileManager.default.currentDirectoryPath }
 
     /// 한 번에 보여 줄 최대 줄 수. 이보다 길면 상자 안에서 스크롤한다 —
     /// 상자가 pane을 다 먹으면 정작 결과를 볼 자리가 없다.
@@ -27,7 +29,8 @@ final class CommandComposerView: NSView {
     private let prompt = NSTextField(labelWithString: "❯")
     private let textView = ComposerTextView()
     private let scrollView = NSScrollView()
-    private let hint = NSTextField(labelWithString: "⏎ 실행 · ⇧⏎ 줄바꿈 · esc 터미널")
+    private let hint = NSTextField(labelWithString: "⏎ 실행 · ⇧⏎ 줄바꿈 · ⇥ 완성 · ↑ 히스토리 · esc 터미널")
+    private let completions = CompletionListView()
     private var heightConstraint: NSLayoutConstraint?
     private var colors: ChromeColors = AppTheme.ghosttyDefault.chrome(systemIsDark: false)
     private var fontSize: Float = 13
@@ -35,6 +38,7 @@ final class CommandComposerView: NSView {
     var text: String {
         get { textView.string }
         set {
+            completions.hide()
             textView.string = newValue
             textView.setSelectedRange(NSRange(location: newValue.utf16.count, length: 0))
             refreshHeight()
@@ -68,8 +72,20 @@ final class CommandComposerView: NSView {
         textView.onLeave = { [weak self] in self?.onLeave?() }
         textView.onForwardKey = { [weak self] event in self?.onForwardKey?(event) }
         textView.onHistoryStep = { [weak self] step in
-            guard let self, let recalled = onHistoryStep?(step) else { return }
+            guard let self else { return }
+            // 후보 목록이 떠 있으면 방향키는 목록을 고르는 데 쓴다.
+            if completions.isShowing {
+                completions.moveSelection(by: step < 0 ? -1 : 1)
+                return
+            }
+            guard let recalled = onHistoryStep?(step) else { return }
             text = recalled
+        }
+        textView.onComplete = { [weak self] in self?.completeToken() }
+        textView.onDismiss = { [weak self] in
+            guard let self, completions.isShowing else { return false }
+            completions.hide()
+            return true
         }
 
         scrollView.documentView = textView
@@ -109,6 +125,7 @@ final class CommandComposerView: NSView {
 
     func apply(colors: ChromeColors) {
         self.colors = colors
+        completions.apply(colors: colors)
         // 터미널 배경에서 살짝 들어 올린 색. 같은 색이면 어디까지가 입력
         // 상자인지 알 수 없고, 다른 색을 쓰면 창 안에 딴 물건이 얹힌다.
         let lift: CGFloat = colors.isDark ? 0.06 : 0.04
@@ -140,6 +157,11 @@ final class CommandComposerView: NSView {
         refreshHint()
     }
 
+    /// 상자가 다른 pane으로 옮겨 붙거나 글이 통째로 바뀔 때 목록을 접는다.
+    func hideCompletions() {
+        completions.hide()
+    }
+
     /// 창이 넘겨 준 첫 글자. 상자로 포커스를 옮기고 그 키를 여기서 받는다.
     func beginTyping(with event: NSEvent) {
         focus()
@@ -155,7 +177,70 @@ final class CommandComposerView: NSView {
 
     // MARK: - 동작
 
+    /// Tab. 목록이 떠 있으면 고른 것을 넣고, 아니면 후보를 찾는다.
+    private func completeToken() {
+        if completions.isShowing, let candidate = completions.selectedCandidate {
+            apply(candidate: candidate)
+            return
+        }
+
+        let caret = textView.selectedRange().location
+        guard let result = CommandCompletion.complete(
+            text: textView.string,
+            caret: caret,
+            workingDirectory: workingDirectory()
+        ) else { return }
+
+        // 후보가 하나면 바로 넣는다. 여럿이면 공통 앞부분까지만 채우고 목록을
+        // 띄운다 — 셸에서 Tab을 눌렀을 때와 같은 순서다.
+        if result.candidates.count == 1 {
+            apply(candidate: result.candidates[0])
+            return
+        }
+
+        let token = (textView.string as NSString).substring(with: result.range)
+        if result.commonPrefix.count > token.count {
+            replaceToken(at: result.range, with: result.commonPrefix)
+        }
+        showCompletions(result.candidates)
+    }
+
+    private func apply(candidate: String) {
+        let caret = textView.selectedRange().location
+        let range = NSRange(
+            location: CommandCompletion.tokenStart(in: Array(textView.string.utf16), before: caret),
+            length: 0
+        )
+        let tokenRange = NSRange(location: range.location, length: caret - range.location)
+        replaceToken(at: tokenRange, with: candidate)
+        completions.hide()
+    }
+
+    private func replaceToken(at range: NSRange, with replacement: String) {
+        guard let storage = textView.textStorage else { return }
+        storage.replaceCharacters(in: range, with: replacement)
+        textView.setSelectedRange(NSRange(location: range.location + replacement.utf16.count, length: 0))
+        textView.didChangeText()
+    }
+
+    private func showCompletions(_ candidates: [String]) {
+        guard let host = superview else { return }
+        if completions.superview !== host {
+            completions.removeFromSuperview()
+            completions.translatesAutoresizingMaskIntoConstraints = false
+            host.addSubview(completions)
+            NSLayoutConstraint.activate([
+                completions.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+                completions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+                completions.bottomAnchor.constraint(equalTo: topAnchor, constant: -4),
+            ])
+        }
+        completions.apply(colors: colors)
+        completions.show(candidates)
+    }
+
     private func submit() {
+        completions.hide()
         let value = textView.string
         onSubmit?(value)
         textView.string = ""
@@ -187,6 +272,8 @@ final class CommandComposerView: NSView {
 
 extension CommandComposerView: NSTextViewDelegate {
     func textDidChange(_: Notification) {
+        // 글이 바뀌면 떠 있던 후보는 더 이상 그 토큰의 것이 아니다.
+        if completions.isShowing { completions.hide() }
         refreshHeight()
         refreshHint()
         onTextChange?(textView.string)
@@ -202,6 +289,9 @@ private final class ComposerTextView: NSTextView {
     var onLeave: (() -> Void)?
     var onForwardKey: ((NSEvent) -> Void)?
     var onHistoryStep: ((Int) -> Void)?
+    var onComplete: (() -> Void)?
+    /// esc를 목록이 먼저 먹었는지. true면 상자에 그대로 머문다.
+    var onDismiss: (() -> Bool)?
 
     /// 셸에 그대로 넘길 제어키. 멈추기(⌃C), 파일 끝(⌃D), 잠시 멈추기(⌃Z),
     /// 히스토리 찾기(⌃R), 화면 지우기(⌃L), 코어 덤프(⌃\)다. 나머지 제어키는
@@ -237,10 +327,15 @@ private final class ComposerTextView: NSTextView {
             return
         }
 
-        // 상자가 비어 있을 때의 Tab은 셸 자동완성으로 보낸다. 상자에 글이
-        // 있으면 셸은 그 글을 모르므로 완성해 줄 것이 없다 — 그때는 탭 문자다.
-        if event.keyCode == 48, string.isEmpty {
-            onForwardKey?(event)
+        // Tab은 우리가 완성한다. 셸로 넘겨 봐야 셸은 상자에 쓴 글을 모른다.
+        if event.keyCode == 48 {
+            if string.isEmpty {
+                // 빈 상자에서는 셸에게 넘긴다 — 프롬프트에 이미 쳐 둔 것이
+                // 있으면 그쪽을 완성해야 한다.
+                onForwardKey?(event)
+                return
+            }
+            onComplete?()
             return
         }
 
@@ -248,6 +343,8 @@ private final class ComposerTextView: NSTextView {
     }
 
     override func cancelOperation(_: Any?) {
+        // 후보 목록이 떠 있으면 esc는 목록만 닫는다.
+        if onDismiss?() == true { return }
         onLeave?()
     }
 
